@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>Seneye</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <link rel="stylesheet" href="css/bootstrap.min.css" />
+        <link rel="stylesheet" href="css/card.css" />
+        <script>
+            var username = "";
+            var password = "";
+	    var loginFailed = false;
+            var tanks = [];
+            var cards = 0;
+            var mTank = {
+                tankName: "",
+                tankID: 000000,
+                timeDiff: 0,
+                type: 1
+            }
+
+            function processLoginForm() {
+                // TODO Add checking username and password is actually correct.
+                // TODO sanitize inputs given
+                // TODO react to any other failure of the seneye api.
+                username = $('#inputEmail').val();
+                password = $('#inputPassword').val();
+                $.getJSON("https://api.seneye.com/v1/devices?user="+username+"&pwd="+password, function( data ) {
+                    tanks = [];
+		    console.dir(data)
+                    data.forEach(function(element) {
+                        var mTank = {
+                            tankName: element.description,
+                            tankID: element.id,
+                            timeDiff: element.time_diff,
+                            type: element.type
+                        }
+                        tanks.push(mTank);
+                    });
+                    if ($("#remember-me").is(":checked")) {
+                        document.cookie = "username="+username;
+                        document.cookie = "password="+password;
+                    } else {
+                        document.cookie = "username=; expires=Thu, 01 Jan 1970 00:00:00 UTC"; 
+                        document.cookie = "password=; expires=Thu, 01 Jan 1970 00:00:00 UTC"; 
+                    }
+                    renderTanksinNavbar();
+        	    $("#loginForm").slideUp(300);
+	            $("#main").slideDown(300);
+		    $("#loginfailed").hide(); // In case it was showing before.
+                }).fail(function(d) {
+			// Something went wrong.
+			// Handily, this code also triggers when the username or password are wrong.
+			$("#loginfailed").show();
+		});
+            }
+
+            function fillLoginFormFromCookies() {
+                var ca = document.cookie.split(';');
+		var haveUsername = false;
+		var havePassword = false;
+                ca.forEach(function(element) {
+                    // Remove leading whitespace:
+                    while (element.charAt(0)==' ') {
+                        element = element.substring(1);
+                    }
+                    if (element.indexOf("username=")==0) {
+                        // Found username
+                        $('#inputEmail').val(element.substring("username=".length,element.length))
+			haveUsername = true;
+                    }
+                    if (element.indexOf("password=")==0) {
+                        // Found password
+                        $('#inputPassword').val(element.substring("password=".length,element.length))
+			havePassword = true;
+                    }
+                });
+            }
+
+            function renderTanksinNavbar() {
+                // Remove whatever already exists
+                $(".navbar-nav").empty();
+                // Add new entries that we found
+                tanks.forEach(function(element) {
+                    $(".navbar-nav").append('<li class="nav-item"><a class="nav-link" href="javascript:switchTank(\''+element.tankName+'\')">'+element.tankName+'</a></li>');
+                });
+            }
+            
+            function logout() {
+                $("#main").slideUp(300);
+                $("#loginForm").slideDown(300);
+            }
+
+            function switchTank(tankName) {
+                // Find our tank:
+                tanks.forEach(function(element) {
+                    $("#cards").empty();
+                    cards=0;
+                    if (element.tankName==tankName)
+                    {
+                        // We've found our tank. Let's get to work.
+                        $.getJSON("https://api.seneye.com/v1/devices/"+element.tankID+"?IncludeState=1&user="+username+"&pwd="+password, function( data ) {
+                            jQuery.each(data["exps"], function(i, val) {
+                                console.log(i + "=" + val);
+                                switch(i) {
+                                    case "temperature":
+                                    renderCard("Temperature","°C",20,30,val["curr"]);
+                                    break;
+
+                                    case "nh3":
+                                    renderCard("Ammonia","ppm",0,0.5,val["curr"]);
+                                    break;
+
+                                    case "ph":
+                                    renderCard("pH","",6,9,val["curr"]);
+                                    break;
+
+                                    case "light":
+                                    renderCard("Light","%",0,100,val["curr"]);
+                                    break;
+                                }
+                            });
+                            renderStatusCard   (data["status"].disconnected,
+                                                data["status"].last_experiment,
+                                                data["status"].out_of_water,
+                                                data["status"].slide_expires,
+                                                data["status"].slide_serial,
+                                                data["status"].wrong_slide);
+                            console.log(data["status"].disconnected);
+                            //console.dir(data["exps"]);
+                            /*var tankValues = Array.from(data["exps"]);
+                            tankValues.forEach(function(element) {
+                                console.dir(element);
+                            });*/
+                        });
+                    }
+                });
+            }
+
+            function renderCard(title,label,min,max,current) {
+                var card = $("<div class='card col-md-3 col-xs-12'></div>");
+                var innerCard = $("<div class='card-content'></div>")
+                var gageDiv = $("<div id='gg"+cards+"' class='gauge'></div>")
+                innerCard.append(gageDiv);
+                card.append(innerCard);
+                $("#cards").append(card);
+                var cardGage = new JustGage({
+                    id: "gg"+cards,
+                    value: current,
+                    min: min,
+                    max: max,
+                    title: title,
+                    label: label,
+                    humanFriendly: true,
+                });
+                cards++;
+            }
+
+            function renderStatusCard(disconnected,last_experiment,out_of_water,slide_expires,slide_serial,wrong_slide) {
+                
+                var card = $("<div class='card col-md-3 col-xs-12'></div>");
+                var innerCard = $("<div class='card-content'></div>");
+                if (disconnected==1) {
+                    innerCard.append($("<strong>Seneye is disconnected</strong>"));
+                } else {
+                    if (out_of_water==1) {
+                        innerCard.append($("<strong>Seneye is out of water</strong>"));
+                    } else {
+                        if (wrong_slide==1) {
+                            innerCard.append($("<strong>Unknown slide fitted</strong>"));
+                        } else {
+
+                            innerCard.append($("<p><strong>Seneye is working</strong></p>"));
+                            innerCard.append($("<li>Last test: "+unixTimeToHumanTime(last_experiment)+"</li>"));
+                            innerCard.append($("<li>Slide expires: "+futureUnixTimeToNowComparision(slide_expires)+"</li>"));
+                            innerCard.append($("<li>Slide serial: "+slide_serial+"</li>"));
+                        }
+                    }
+                              
+                }
+                
+                card.append(innerCard);
+                $("#cards").append(card);
+                cards++;
+            }
+
+            function unixTimeToHumanTime(timestamp) {
+                var myDate = moment(timestamp*1000);
+                return myDate.format("lll");
+            }
+
+            function futureUnixTimeToNowComparision(timestamp) {
+                var myDate = moment(timestamp*1000);
+                return myDate.startOf('day').fromNow()
+            }
+
+            function ILikeLongDescriptiveFunctionNames() {
+                // :P
+            }
+        </script>
+    </head>
+    <body>
+        <div id="loginForm" class="container">
+            <form class="form-signin" onsubmit="processLoginForm(); return false;">
+                <h2 class="form-signin-heading">Please sign in</h2>
+		<div id="loginfailed" class="hidden alert alert-danger" style="display:none" role="alert">
+			<strong>Login Failed!</strong> Username or password were incorrect or there is a network problem.
+		</div>
+                <label for="inputEmail" class="sr-only">Email address</label>
+                <input type="email" id="inputEmail" class="form-control" placeholder="Email address" required autofocus>
+                <label for="inputPassword" class="sr-only">Password</label>
+                <input type="password" id="inputPassword" class="form-control" placeholder="Password" required>
+                <div class="checkbox">
+                    <label>
+                    <input type="checkbox" value="remember-me" id="remember-me"> Remember me
+                    </label>
+                </div>
+                <button class="btn btn-lg btn-primary btn-block" type="submit">Sign in</button>
+            </form>
+        </div>
+        <div class="container" id="main" style="display: none">
+            <nav class="navbar navbar-light bg-faded">
+                <h1 class="navbar-brand mb-0">Seneye</h1>
+                <ul class="nav navbar-nav">
+                    <li class="nav-item active">
+                        <a class="nav-link" href="javascript:switchTank('Tank 1')">Tank 1 <span class="sr-only">(current)</span></a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#">Tank 2</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#">Tank 3</a>
+                    </li>
+                </ul>
+                <form class="form-inline float-xs-right">
+                    <button class="btn btn-sm align-middle btn-secondary" type="button" onclick="logout()">Log out</button>
+                </form>
+            </nav>
+            <div id="cards">
+
+            </div>
+        </div>
+        <script src="js/raphael-2.1.4.min.js"></script>
+        <script src="js/justgage.js"></script>
+        <script src="js/jquery-3.1.1.min.js"></script>
+        <script src="js/tether.min.js"></script>
+        <script src="js/bootstrap-4.0.0-alpha5.min.js"></script>
+        <script src="js/moment-with-locales.min.js"></script>
+        <script>
+            $(document).ready(function() {
+                // DOM is fully loaded, we are probably okay to do post loading stuff now.
+                fillLoginFormFromCookies();
+            });
+        </script>
+        </div>
+    </body>
+</html>
